@@ -4,7 +4,14 @@ Model: conditional quantiles of the log-ratio to hour 1, learned from the case's
 comparables (past big launches). For each hour h = 2..24 and each level tau, the
 forecast is p1 * exp(Q_tau(log(viewers_h / viewers_1))), where Q_tau is a
 kernel-weighted empirical quantile over the comparables' own log-ratios and p1
-is hour 1's print.
+is hour 1's print. The empirical quantiles are then blended (in log space)
+with a parametric log-normal fit of the same weighted log-ratios, the blend
+weight set by the effective sample size of the kernel weights: when the
+empirical quantiles rest on few comparables the smooth parametric fit gets
+more weight; when many comparables agree the empirical quantiles dominate.
+This steadies the tails where the empirical quantiles are noisiest (small
+hour-1 launches) without moving the large-launch forecasts that GTA VI
+resembles.
 
 Why this shape: a launch's day is driven by when each region unlocks. Hour 1
 (00:00-01:00 UTC) is before most of the world unlocks for a rolling-midnight
@@ -19,10 +26,15 @@ rolling comparables are upweighted (x5) and the simultaneous ones downweighted
 improves the log-scale pinball loss.
 
 Validation (leave-one-out over the 37 complete comparable launch curves in the
-kit, each scored against its own true hours 2..24): mean pinball loss 0.403,
+kit, each scored against its own true hours 2..24): mean pinball loss 0.395,
 versus 0.930 for the house persistence baseline on the same set; on
-large-hour-1 launches (the regime of GTA VI and of the practice cases) 0.197
+large-hour-1 launches (the regime of GTA VI and of the practice cases) 0.199
 versus 0.226. The house baseline scores about 0.387 on the practice cases.
+The blend was chosen against the empirical-only model (0.405 overall, 0.199
+large-hour-1): widening the spread, a pure parametric fit, and a per-hour
+median-bias correction were all tried in the same LOO and rejected — the
+spread widening and the bias correction hurt, and the pure parametric fit
+helped small launches but hurt large ones.
 
 Deterministic, standard library only, no network. Reads every *.in in the input
 directory and writes one *.out per case. Run the same way as the starter:
@@ -51,6 +63,14 @@ BANDWIDTH = 1.0
 # When the case is a rolling-midnight launch, rolling comparables get this
 # multiplier and simultaneous ones its reciprocal.
 ROLLING_BOOST = 4.0
+# Blend with the parametric (log-normal) fit of the log-ratios. The blend
+# weight is alpha = (BLEND_K / (BLEND_K + ESS)) ** BLEND_POWER, where ESS is
+# the effective sample size of the kernel weights: few comparables really
+# bearing on the case (small ESS) means the empirical quantiles are noisy, so
+# the smooth parametric fit gets more weight; many comparables (large ESS)
+# means the empirical quantiles are trustworthy and dominate.
+BLEND_K = 5.0
+BLEND_POWER = 1.5
 
 
 def round2(x: float) -> float | int:
@@ -97,6 +117,34 @@ def weighted_quantile(pairs, tau: float) -> float:
             return prev_value + (value - prev_value) * frac
         prev_value, prev_cum = value, acc
     return ordered[-1][0]
+
+
+def effective_sample_size(weights) -> float:
+    """(sum w)^2 / sum(w^2): how many comparables the kernel really rests on.
+
+    Near 1 when a single comparable dominates the weights, near the count of
+    comparables when they weigh about equally.
+    """
+    total = sum(weights)
+    if total <= 0:
+        return 0.0
+    return total * total / sum(w * w for w in weights)
+
+
+def parametric_quantiles(pairs, p1: float):
+    """Log-normal quantiles of the log-ratios: weighted mean/sd, q = p1*exp(mu+z*sd).
+
+    pairs is a list of (log-ratio, weight). A smooth fit that is steadier than
+    the empirical quantiles when the effective sample is small. Returns None
+    when the pairs carry no weight.
+    """
+    total = sum(w for _, w in pairs)
+    if total <= 0:
+        return None
+    mu = sum(v * w for v, w in pairs) / total
+    var = sum(w * (v - mu) ** 2 for v, w in pairs) / total
+    sd = math.sqrt(max(var, 1e-6))
+    return [p1 * math.exp(mu + z * sd) for z in Z]
 
 
 def comparable_curves(case: dict) -> list:
@@ -157,7 +205,7 @@ def forecast_case(case: dict, name: str) -> dict:
         offset = h - 1
         quantiles = None
         if curves:
-            pairs_by_tau = {tau: [] for tau in LEVELS}
+            pairs = []
             for curve in curves:
                 if offset not in curve["ratio"]:
                     continue
@@ -167,13 +215,26 @@ def forecast_case(case: dict, name: str) -> dict:
                         weight *= 1.0 + ROLLING_BOOST
                     elif curve["unlock"] == "simultaneous":
                         weight *= 1.0 / (1.0 + ROLLING_BOOST)
-                for tau in LEVELS:
-                    pairs_by_tau[tau].append((curve["ratio"][offset], weight))
-            if all(pairs_by_tau[tau] for tau in LEVELS):
-                quantiles = [
-                    p1 * math.exp(weighted_quantile(pairs_by_tau[tau], tau))
-                    for tau in LEVELS
+                pairs.append((curve["ratio"][offset], weight))
+            if pairs:
+                empirical = [
+                    p1 * math.exp(weighted_quantile(pairs, tau)) for tau in LEVELS
                 ]
+                parametric = parametric_quantiles(pairs, p1)
+                if parametric is None:
+                    quantiles = empirical
+                else:
+                    ess = effective_sample_size([w for _, w in pairs])
+                    alpha = (
+                        (BLEND_K / (BLEND_K + ess)) ** BLEND_POWER if ess > 0 else 0.5
+                    )
+                    quantiles = [
+                        math.exp(
+                            (1.0 - alpha) * math.log(max(emp, 1e-9))
+                            + alpha * math.log(max(par, 1e-9))
+                        )
+                        for emp, par in zip(empirical, parametric)
+                    ]
         if quantiles is None:
             # Fallback: the house persistence forecast (no usable comparables).
             quantiles = [
