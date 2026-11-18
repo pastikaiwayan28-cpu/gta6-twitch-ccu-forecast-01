@@ -1,9 +1,13 @@
 # GTA VI Twitch CCU forecast (gta6-twitch-ccu-forecast-01)
 
+[![make.fun · gta6-twitch-ccu-forecast-01](https://make.fun/badge/gta6-twitch-ccu-forecast-01.svg)](https://make.fun/bounty/gta6-twitch-ccu-forecast-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-twitch-ccu-forecast-01)
+[![rank](https://make.fun/badge/gta6-twitch-ccu-forecast-01/pastikaiwayan28-cpu/gta6-twitch-ccu-forecast-01/rank.svg)](https://make.fun/bounty/gta6-twitch-ccu-forecast-01/leaderboard?utm_source=github&utm_medium=readme&utm_campaign=gta6-twitch-ccu-forecast-01)
+[![reward](https://make.fun/badge/gta6-twitch-ccu-forecast-01/pastikaiwayan28-cpu/gta6-twitch-ccu-forecast-01/reward.svg)](https://make.fun/bounty/gta6-twitch-ccu-forecast-01?utm_source=github&utm_medium=readme&utm_campaign=gta6-twitch-ccu-forecast-01)
+
 Forecasts, hour by hour, how many people watch Grand Theft Auto VI live on
 Twitch over the 24 UTC hours of its release day (2026-11-19), from everything
 recorded up to the end of hour 1, as five quantiles per hour (0.05 / 0.25 /
-0.5 / 0.75 / 0.95).
+0.5 / 0.75 / 0.95). Built for the [make.fun bounty](https://make.fun/bounty/gta6-twitch-ccu-forecast-01).
 
 ## Program
 
@@ -31,7 +35,7 @@ is in.
 
 Leave-one-out over the 37 complete comparable launch curves in the kit
 (each scored against its own true hours 2..24): mean pinball loss (log
-scale) 0.405, versus 0.930 for the house persistence baseline on the same
+scale) 0.395, versus 0.930 for the house persistence baseline on the same
 set; on large-hour-1 launches (the regime of GTA VI and of the practice
 cases) 0.199. The house baseline scores about 0.387 on the practice cases.
 
